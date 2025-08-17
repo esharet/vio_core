@@ -4,6 +4,7 @@ import time
 # import matplotlib.pyplot as plt
 import logging
 from of_vio.utils import world2img_generator
+# import  of_vio.vio_debugger
 
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
@@ -75,7 +76,7 @@ class VIO:
             logging.info("First points, save in cache and exit")
             return
             
-
+        
         vx, vy = self._calc_speed_xy(P_hit-self.cache)
         self.cache = P_hit
         return vx, vy
@@ -125,7 +126,7 @@ def gen_sector_center_points():
     return centers
 
 def gen_multiple_middle_points(x, y):
-    POINTS = 150
+    POINTS = 500
     points = np.array(
         [[x, y]]
     )
@@ -143,14 +144,17 @@ if __name__ == "__main__":
 
     vx, vy = 0, 0
     
-    # d1 = gen_multiple_middle_points(320, 242)
-    # d2 = gen_multiple_middle_points(320, 240)
+    d1 = gen_multiple_middle_points(320, 242)
+    d2 = gen_multiple_middle_points(320, 240)
 
     # d1 = gen_sector_center_points()
     # d2 = gen_sector_center_points()
 
-    d1 = world2img_generator.world_to_pixel(0, 0, ALTITUDE, C_world_orientation)
-    d2 = world2img_generator.world_to_pixel(0, 1, ALTITUDE, C_world_orientation)
+    # d1 = world2img_generator.world_to_pixel(0, 0, ALTITUDE, C_world_orientation)
+    # d2 = world2img_generator.world_to_pixel(0, 0.5, ALTITUDE, C_world_orientation)
+    # d3 = world2img_generator.world_to_pixel(0, 1.0, ALTITUDE, C_world_orientation)
+    # d4 = world2img_generator.world_to_pixel(0, 1.5, ALTITUDE, C_world_orientation)
+    # d5 = world2img_generator.world_to_pixel(0, 2.0, ALTITUDE, C_world_orientation)
     
     for points_snap in [d1, d2]:
         start = time.perf_counter()
@@ -158,7 +162,6 @@ if __name__ == "__main__":
         if result is not None:
             vx, vy = result
         end = time.perf_counter()
-
-
-    # logging.info(f"Runtime: {end - start} seconds")
-    logging.info(f"vx: {vx}, vy: {vy}")
+        logging.info(f"vx: {vx}, vy: {vy}")
+        logging.info(f"Runtime: {end - start} seconds")    # logging.info(f"Runtime: {end - start} seconds")
+    
