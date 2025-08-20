@@ -8,3 +8,7 @@ Estimate velocity using optical flow
 ```
 Ah, yes — this is about camera intrinsics 🐺. Let’s clarify the relation between image size (width, height) and focal lengths (fx, fy).
 ```
+
+```
+using optical flow for velocity estimate did the edge pixel represent more distance because the bigger angel
+```
