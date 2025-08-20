@@ -4,11 +4,12 @@ import matplotlib.pyplot as plt
 # --------------------- Camera setup (same style as yours) ---------------------
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
+FX = FY = 800
 CX = CAMERA_WIDTH / 2
 CY = CAMERA_HEIGHT / 2
 
 # Intrinsics (your choice: fx=640, fy=480, cx=320, cy=240)
-K = np.array([[CAMERA_WIDTH, 0, CX], [0, CAMERA_HEIGHT, CY], [0, 0, 1]], dtype=float)
+K = np.array([[FX, 0, CX], [0, FY, CY], [0, 0, 1]], dtype=float)
 
 
 def world_to_pixel(x, y, alt, orientation):

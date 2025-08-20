@@ -5,20 +5,29 @@ import time
 import logging
 from of_vio.utils import world2img_generator
 # import  of_vio.vio_debugger
+import math
+
 
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
+FX = FY = 800
 CX = CAMERA_WIDTH / 2
 CY = CAMERA_HEIGHT / 2
 
 logging.basicConfig(level=logging.INFO)
 
+def fov_to_focal_length(fov_deg: float, sensor_size: float) -> float:
+    fov_rad = math.radians(fov_deg)  # convert degrees to radians
+    focal_length = sensor_size / (2 * math.tan(fov_rad / 2))
+    return focal_length
 
 class VIO:
     def __init__(self):
+        # f = fov_to_focal_length(50, 640)
+        # logging.info(f"Focal length: {f}")
         self.K = np.array([
-            [CAMERA_WIDTH, 0, CX],
-            [0, CAMERA_HEIGHT, CY],
+            [FX, 0, CX],
+            [0, FY, CY],
             [0, 0, 1]
         ])
         self.K_inv = np.linalg.inv(self.K)
@@ -76,7 +85,7 @@ class VIO:
             logging.info("First points, save in cache and exit")
             return
             
-        
+
         vx, vy = self._calc_speed_xy(P_hit-self.cache)
         self.cache = P_hit
         return vx, vy
@@ -144,19 +153,19 @@ if __name__ == "__main__":
 
     vx, vy = 0, 0
     
-    d1 = gen_multiple_middle_points(320, 242)
-    d2 = gen_multiple_middle_points(320, 240)
+    # d1 = gen_multiple_middle_points(320, 242)
+    # d2 = gen_multiple_middle_points(320, 240)
 
     # d1 = gen_sector_center_points()
     # d2 = gen_sector_center_points()
 
-    # d1 = world2img_generator.world_to_pixel(0, 0, ALTITUDE, C_world_orientation)
-    # d2 = world2img_generator.world_to_pixel(0, 0.5, ALTITUDE, C_world_orientation)
-    # d3 = world2img_generator.world_to_pixel(0, 1.0, ALTITUDE, C_world_orientation)
-    # d4 = world2img_generator.world_to_pixel(0, 1.5, ALTITUDE, C_world_orientation)
-    # d5 = world2img_generator.world_to_pixel(0, 2.0, ALTITUDE, C_world_orientation)
+    d1 = world2img_generator.world_to_pixel(0, 0, ALTITUDE, C_world_orientation)
+    d2 = world2img_generator.world_to_pixel(0, 0.5, ALTITUDE, C_world_orientation)
+    d3 = world2img_generator.world_to_pixel(0, 1.0, ALTITUDE, C_world_orientation)
+    d4 = world2img_generator.world_to_pixel(0, 1.5, ALTITUDE, C_world_orientation)
+    d5 = world2img_generator.world_to_pixel(0, 2.0, ALTITUDE, C_world_orientation)
     
-    for points_snap in [d1, d2]:
+    for points_snap in [d1, d2, d3, d4, d5]:
         start = time.perf_counter()
         result = vio.calc_velocity(points_snap, ALTITUDE, orientation=C_world_orientation)
         if result is not None:
