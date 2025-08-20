@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # --------------------- Camera setup (same style as yours) ---------------------
+FX = FY = 800
 CAMERA_WIDTH  = 640
 CAMERA_HEIGHT = 480
 CX = CAMERA_WIDTH / 2
@@ -9,8 +10,8 @@ CY = CAMERA_HEIGHT / 2
 
 # Intrinsics (your choice: fx=640, fy=480, cx=320, cy=240)
 K = np.array([
-    [CAMERA_WIDTH, 0,            CX],
-    [0,            CAMERA_HEIGHT, CY],
+    [FX, 0,            CX],
+    [0,            FY, CY],
     [0,            0,             1]
 ], dtype=float)
 

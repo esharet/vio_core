@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # region Camera
+FX = FY = 800
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
 CX = CAMERA_WIDTH / 2
@@ -14,14 +15,14 @@ CY = CAMERA_HEIGHT / 2
 
 u, v = 320, 240  # Pixel coordinates
 # u, v = 320, 248.37843123  # Pixel coordinates
-pitch_deg = 0  # Pitch angle in degrees
+pitch_deg = 30  # Pitch angle in degrees
 # pitch_deg = 31  # Pitch angle in degrees
 C_world = np.array([0, 0, 10])  # Camera position in world coordinates
 
 # Camera intrinsics
 K = np.array([
-    [CAMERA_WIDTH, 0, CX],
-    [0, CAMERA_HEIGHT, CY],
+    [FX, 0, CX],
+    [0, FY, CY],
     [0, 0, 1]
 ])
 # endregion Camera
