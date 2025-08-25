@@ -1,176 +1,170 @@
-from typing import List
+"""
+Generate synthetic image sequences for testing optical flow algorithms.
+Create motion on x axes
+Using cuda to run lucas kanade optical flow
+Using cuda pinned memory
+"""
+import cv2
 import numpy as np
-import time
-# import matplotlib.pyplot as plt
 import logging
-from of_vio.utils import world2img_generator
-# import  of_vio.vio_debugger
-import math
+from typing import NamedTuple
+
+log = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
 
-CAMERA_WIDTH = 640
-CAMERA_HEIGHT = 480
-FX = FY = 800
-CX = CAMERA_WIDTH / 2
-CY = CAMERA_HEIGHT / 2
+def create_test_sequence(num_frames=300,  motion_speed=3,width=640, height=480):
+    # Initial positions
+    circle_start = (150, 200)    # Circle starts at left
+    rect_start = (120, 100)      # Rectangle starts at left
 
-logging.basicConfig(level=logging.INFO)
+    # Object properties
+    circle_radius = 30
+    rect_size = (50, 50)  # width, height
+    for frame_idx in range(num_frames):
+        # Create black background
+        img = np.zeros((height, width, 3), dtype=np.uint8)
 
-def fov_to_focal_length(fov_deg: float, sensor_size: float) -> float:
-    fov_rad = math.radians(fov_deg)  # convert degrees to radians
-    focal_length = sensor_size / (2 * math.tan(fov_rad / 2))
-    return focal_length
+        # Calculate current positions (moving right)
+        circle_x = circle_start[0] + (frame_idx * motion_speed)
+        circle_y = circle_start[1]
 
-class VIO:
-    def __init__(self):
-        # f = fov_to_focal_length(50, 640)
-        # logging.info(f"Focal length: {f}")
-        self.K = np.array([
-            [FX, 0, CX],
-            [0, FY, CY],
-            [0, 0, 1]
-        ])
-        self.K_inv = np.linalg.inv(self.K)
-        
-         
-        self.cache = None
+        rect_x = rect_start[0] + (frame_idx * motion_speed)
+        rect_y = rect_start[1]
 
-    def init_vio(self, points: np.array):
+        # Wrap around if objects go off screen (optional)
+        circle_x = circle_x % (width + circle_radius * 2) - circle_radius
+        rect_x = rect_x % (width + rect_size[0]) - rect_size[0]
+
+        # Draw white circle
+        if -circle_radius <= circle_x <= width + circle_radius:
+            cv2.circle(img, (int(circle_x), int(circle_y)), circle_radius, (0, 0, 255), -1)
+
+        # Draw green rectangle
+        if -rect_size[0] <= rect_x <= width:
+            cv2.rectangle(img, 
+                        (int(rect_x), int(rect_y)), 
+                        (int(rect_x + rect_size[0]), int(rect_y + rect_size[1])), 
+                        (0, 255, 0), -1)
+
+        # Draw green rectangle
+        if -rect_size[0] <= rect_x <= width:
+            rect_y2 = rect_y + 200 * np.sin(frame_idx / 10)  # Add vertical oscillation
+            cv2.rectangle(img, 
+                        (int(rect_x), int(rect_y2)), 
+                        (int(rect_x + rect_size[0]), int(rect_y2 + rect_size[1])), 
+                        (0, 255, 0), -1)
+
+
+        yield img
+
+
+class LKResult(NamedTuple):
+    good_new: np.ndarray
+    good_old: np.ndarray
+
+class LK():
+    def __init__(self, w, h):
+        self.gpu_detector = cv2.cuda.createGoodFeaturesToTrackDetector(
+            cv2.CV_8UC1,
+            maxCorners=100,
+            qualityLevel=0.3,
+            minDistance=7,
+            blockSize=7
+        )
+
+        self.lk = cv2.cuda.SparsePyrLKOpticalFlow_create(
+            winSize=(15, 15), 
+            maxLevel=5,
+            iters=10, 
+            useInitialFlow=False
+        )
+
+
+        # create pin memeory
+        PAGE_LOCKED = 1
+        pinned_img = cv2.cuda.HostMem(h, w, cv2.CV_8UC3, PAGE_LOCKED)
+        self.pin_image = pinned_img.createMatHeader() 
+        """ pinned memory for input image """
+
+        self.gpu_img = cv2.cuda.GpuMat() 
+        """ hold the current frame as GpuMat """
+        self.gpu_prev_gray = cv2.cuda.GpuMat()
+        """ hold previous frame as GpuMat """
+        self.p0_gpu = cv2.cuda.GpuMat()
+        """ hold previous points as GpuMat """
+
+        self.minmun_points_to_redetect = 2
+
+    def process_frame(self, frame: np.ndarray) -> LKResult:
         """
-        save current points in cache for the next estimate
-        get point from O.F shape (:, 1, 2)
+        Process a single frame for optical flow tracking.
+        upload the frame to GPU memory from pinned memory.
+        run detection if no points to track. (run on gpu)
+        run lk calculation. on gpu
         """
-        self.cache = points
+        p1_gpu: cv2.cuda.GpuMat
+        status_gpu: cv2.cuda.GpuMat
+        error_gpu: cv2.cuda.GpuMat
 
-    def calc_velocity(self, points: np.array,
-                      altitude: float, 
-                      orientation: np.array):
-        """
-        save current points in cache for the next estimate
-        get point from O.F shape (:, 1, 2)
-        """
-        pitch_deg = orientation[1]
-        self.C_world = np.array([0, 0, altitude])
-        # TODO: Add full orination support
-        R = np.array([
-            [1, 0, 0],
-            [0, np.cos(np.deg2rad(pitch_deg)), -np.sin(np.deg2rad(pitch_deg))],
-            [0, np.sin(np.deg2rad(pitch_deg)), np.cos(np.deg2rad(pitch_deg))]
+        self.pin_image[:] = frame
+        self.gpu_img.upload(self.pin_image)
+        gpu_gray = cv2.cuda.cvtColor(self.gpu_img, cv2.COLOR_BGR2GRAY)
 
-        ])
-        
-        R_wc = R
-        # Step 1: homogeneous pixels
-        points = points.reshape(-1, 2)
-        points = np.hstack([points, np.ones((points.shape[0], 1), dtype=points.dtype)])  # (N, 3)
+        if self.p0_gpu.empty():
+            self.p0_gpu = self.gpu_detector.detect(gpu_gray)
+            if self.p0_gpu.empty():
+                raise RuntimeError("No features detected.")
 
-        # Step 2: backproject into camera frame
-        d_c = self.K_inv @ points.T  # (3, N)
+            log.debug(f"---- Initial points detected: {self.p0_gpu.size()}")
+            self.gpu_prev_gray = gpu_gray.clone()
 
-        # (Optional) Normalize each ray direction
-        d_c /= np.linalg.norm(d_c, axis=0, keepdims=True)
+        # Calculate optical flow
+        p1_gpu, status_gpu, error_gpu = self.lk.calc(
+            self.gpu_prev_gray, 
+            gpu_gray,
+            self.p0_gpu,
+            None,)
 
-        # Step 3: rotate to world frame
-        d_w = R_wc @ d_c  # (3, N)
+        # Download point from gpu for fautere filter and process
+        p0 = self.p0_gpu.download().reshape(-1, 2)
+        p1 = p1_gpu.download().reshape(-1, 2)
+        status = status_gpu.download().reshape(-1).astype(bool)
+        error = error_gpu.download().reshape(-1)
 
-        # Step 4: ray-plane intersection (plane z=0)
-        t_ray = -self.C_world[2] / d_w[2, :]  # (N,)
+        good_new: np.ndarray = p1[status]
+        good_old: np.ndarray = p0[status]
 
-        # Step 5: compute intersection
-        P_hit = self.C_world.reshape(3, 1) + d_w * t_ray  # (3, N)
-        P_hit = P_hit.T  # (N, 3)
+        # upload new point back to gpu for the next iteration
+        if len(good_new) > self.minmun_points_to_redetect:
+            self.p0_gpu.upload(good_new.reshape(1, -1, 2).astype(np.float32))
+        else:
+            log.warning("No points to track, re-detecting.")
+            self.p0_gpu = cv2.cuda.GpuMat()
 
-        if self.cache is None:
-            self.cache = P_hit
-            logging.info("First points, save in cache and exit")
-            return
-            
 
-        vx, vy = self._calc_speed_xy(P_hit-self.cache)
-        self.cache = P_hit
-        return vx, vy
-    
-    def _calc_speed_xy(self, deltas: np.array):
-        """
-        points shape (:, 1, 3)
-        """
+        self.gpu_prev_gray = gpu_gray.clone()
 
-        x = deltas[:, 0]  # X coordinates
-        y = deltas[:, 1]  # Y coordinate
-
-        # --- 1. Histogram ---
-        #  why
-        # counts_x, bin_edges_x = np.histogram(x, bins=50)
-        # counts_y, bin_edges_y = np.histogram(y, bins=50)
-
-        
-
-        # --- 2. Compute mean and std ---
-        mean_x, std_x = np.mean(x), np.std(x)
-        mean_y, std_y = np.mean(y), np.std(y)
-
-        return mean_x, mean_y
-
-def gen_sector_center_points():
-    width = 640   # X
-    height = 480  # Y
-
-    cols = 3
-    rows = 3
-
-    sector_w = width / cols
-    sector_h = height / rows
-
-    centers = []
-
-    for i in range(rows):       # row index
-        for j in range(cols):   # column index
-            # Center coordinates
-            cx = (j + 0.5) * sector_w
-            cy = (i + 0.5) * sector_h
-            centers.append((cx, cy))
-
-    # Convert to numpy array if needed
-    centers = np.array(centers).reshape(-1, 1, 2)
-    return centers
-
-def gen_multiple_middle_points(x, y):
-    POINTS = 500
-    points = np.array(
-        [[x, y]]
-    )
-    points = np.tile(points, (POINTS, 1, 1))
-
-    return points
+        return LKResult(good_new=good_new, good_old=good_old)
 
 
 if __name__ == "__main__":
-    vio = VIO()
-    pitch_deg = 0
-    ALTITUDE = 10
-    C_world_orientation = np.array([
-        0, pitch_deg, 0])
+    COLOR_NEW = (0, 0, 255) # RED
+    COLOR_OLD = (255, 0, 0) # BLUE
+    new: np.ndarray 
+    old: np.ndarray
 
-    vx, vy = 0, 0
-    
-    # d1 = gen_multiple_middle_points(320, 242)
-    # d2 = gen_multiple_middle_points(320, 240)
+    lk = LK(640, 480)
+    images = create_test_sequence()
+    while (frame := next(images, None)) is not None:
+        good_new, good_old = lk.process_frame(frame)
 
-    # d1 = gen_sector_center_points()
-    # d2 = gen_sector_center_points()
-
-    d1 = world2img_generator.world_to_pixel(0, 0, ALTITUDE, C_world_orientation)
-    d2 = world2img_generator.world_to_pixel(0, 0.5, ALTITUDE, C_world_orientation)
-    d3 = world2img_generator.world_to_pixel(0, 1.0, ALTITUDE, C_world_orientation)
-    d4 = world2img_generator.world_to_pixel(0, 1.5, ALTITUDE, C_world_orientation)
-    d5 = world2img_generator.world_to_pixel(0, 2.0, ALTITUDE, C_world_orientation)
-    
-    for points_snap in [d1, d2, d3, d4, d5]:
-        start = time.perf_counter()
-        result = vio.calc_velocity(points_snap, ALTITUDE, orientation=C_world_orientation)
-        if result is not None:
-            vx, vy = result
-        end = time.perf_counter()
-        logging.info(f"vx: {vx}, vy: {vy}")
-        logging.info(f"Runtime: {end - start} seconds")    # logging.info(f"Runtime: {end - start} seconds")
-    
+        for new, old in zip(good_new, good_old):
+            a, b = new.ravel().astype(int)
+            c, d = old.ravel().astype(int)
+            # cv2.arrowedLine(img, (c, d), (a, b), (0, 255, 255), 2, tipLength=0.3)
+            cv2.circle(frame, (a, b), 3, COLOR_NEW, -1)
+            cv2.circle(frame, (c, d), 3, COLOR_OLD, -1)
+        cv2.imshow("LK Optical Flow CUDA", frame)
+        if cv2.waitKey(100) & 0xFF == 27:
+            break
