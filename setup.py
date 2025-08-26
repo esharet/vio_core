@@ -1,15 +1,9 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="of_vio",
-    version="0.1",
+    name="vio_core",
+    version="0.2",
     packages=find_packages(),
-    entry_points={
-        "console_scripts": [
-            "myapp=my_python_app.app:main"
-        ]
-    },
-    install_requires=[],  # Add dependencies here if any
     author="Your Name",
     description="A simple Python app",
 )
