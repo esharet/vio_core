@@ -4,10 +4,13 @@ Create motion on x axes
 Using cuda to run lucas kanade optical flow
 Using cuda pinned memory
 """
+import time
 import cv2
 import numpy as np
 import logging
 from typing import NamedTuple
+
+import matplotlib.pyplot as plt
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -94,7 +97,7 @@ class LK():
         self.p0_gpu = cv2.cuda.GpuMat()
         """ hold previous points as GpuMat """
 
-        self.minmun_points_to_redetect = 2
+        self.minmun_points_to_redetect = 80
 
     def process_frame(self, frame: np.ndarray) -> LKResult:
         """
@@ -148,13 +151,62 @@ class LK():
         return LKResult(good_new=good_new, good_old=good_old)
 
 
-if __name__ == "__main__":
+def plot_feature_motion_histogram(old_good_features, new_good_features):
+    """
+    Computes the motion (pixel-wise Euclidean distance) between old and new features,
+    and plots a histogram of the motion magnitudes.
+
+    Parameters:
+    - old_good_features: np.ndarray of shape (N, 2) or (N, 1, 2)
+    - new_good_features: np.ndarray of shape (N, 2) or (N, 1, 2)
+    """
+
+    # Ensure proper shape (N, 2)
+    old = np.squeeze(old_good_features)
+    new = np.squeeze(new_good_features)
+
+    # Check shapes match
+    if old.shape != new.shape:
+        raise ValueError("old_good_features and new_good_features must have the same shape after squeezing.")
+
+    # Calculate motion (Euclidean distance)
+    motions = np.linalg.norm(new - old, axis=1)
+
+    # Plot histogram of motions
+    plt.hist(motions, bins=30, edgecolor='black')
+    plt.xlabel('Motion (pixels)')
+    plt.ylabel('Frequency')
+    plt.title('Histogram of Feature Motions')
+    plt.grid(True)
+    plt.show()
+
+
+def plot_histogram(data):
+    plt.hist(data, bins=range(min(data), max(data) + 2), edgecolor='black', align='left')
+    plt.xlabel('pixel motion Value')
+    plt.ylabel('Frequency')
+    plt.title('Histogram of Integer List')
+    plt.show()
+
+def test_histogram():
+    # Simulated feature points (e.g., from optical flow tracking)
+    old_features = np.array([[10, 10], [20, 20], [30, 30], [40, 40]])
+    new_features = np.array([[12, 13], [22, 18], [33, 31], [37, 39]])
+
+    plot_feature_motion_histogram(old_features, new_features)
+
+
+def test_lk():
     COLOR_NEW = (0, 0, 255) # RED
     COLOR_OLD = (255, 0, 0) # BLUE
     new: np.ndarray 
     old: np.ndarray
 
     lk = LK(640, 480)
+
+    counter = 0
+    start_time = time.perf_counter()
+    
     images = create_test_sequence()
     while (frame := next(images, None)) is not None:
         good_new, good_old = lk.process_frame(frame)
@@ -165,6 +217,17 @@ if __name__ == "__main__":
             # cv2.arrowedLine(img, (c, d), (a, b), (0, 255, 255), 2, tipLength=0.3)
             cv2.circle(frame, (a, b), 3, COLOR_NEW, -1)
             cv2.circle(frame, (c, d), 3, COLOR_OLD, -1)
+
+        
         cv2.imshow("LK Optical Flow CUDA", frame)
         if cv2.waitKey(100) & 0xFF == 27:
             break
+
+        end_time = time.perf_counter()
+        counter += 1
+        elapsed = end_time - start_time
+        print(f"Elapsed time: {elapsed/counter:.6f} seconds")
+
+
+if __name__ == "__main__":
+    test_lk()
